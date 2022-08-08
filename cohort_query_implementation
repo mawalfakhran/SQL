@@ -1,0 +1,61 @@
+WITH activities AS (
+  SELECT 
+    agent_code
+    , FORMAT_DATE('%Y-%m', DATE(job_result_created)) as job_result_created
+  FROM `dbt_data.agt_mart_job_results_v2`
+  WHERE job_result_status = 'Approve'
+  GROUP BY agent_code, job_result_created
+),
+cohorts AS (
+  SELECT 
+    agent_code
+    ,MIN(job_result_created) AS cohort
+  FROM activities
+  GROUP BY agent_code
+),
+periods AS (
+  SELECT 
+    job_result_created
+    , ROW_NUMBER() OVER(ORDER BY job_result_created) AS num
+  FROM(
+    SELECT
+      DISTINCT(cohort) AS job_result_created FROM cohorts
+  )
+),
+cohorts_size AS (
+  SELECT
+    c.cohort
+    , p.num AS num
+    , COUNT(DISTINCT(a.agent_code)) AS ids
+    FROM cohorts c
+    JOIN activities a
+      ON a.job_result_created = c.cohort AND c.agent_code = a.agent_code
+    JOIN periods p
+      ON p.job_result_created = c.cohort
+  GROUP BY cohort, num
+),
+retention AS (
+  SELECT
+    c.cohort
+    , a.job_result_created AS period
+    , p.num AS num
+    , COUNT(DISTINCT(c.agent_code)) AS ids
+  FROM periods p
+  JOIN activities a
+    ON a.job_result_created = p.job_result_created
+  JOIN cohorts c
+    ON c.agent_code = a.agent_code
+  GROUP BY cohort, period, num
+)
+--
+SELECT
+  CONCAT(cs.cohort, ' - ', FORMAT("%'d", cs.ids), ' users') AS cohort
+  , r.num - cs.num AS period_lag
+  , r.period as period_label
+  , ROUND(r.ids / cs.ids * 100,2) AS retention 
+  , r.ids as rids
+FROM retention r
+JOIN cohorts_size cs
+  ON cs.cohort = r.cohort
+WHERE cs.cohort >= FORMAT_DATE('%Y-%m', DATE('2022-01-01'))
+ORDER BY cohort, period_lag, period_label
