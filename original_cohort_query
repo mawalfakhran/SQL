@@ -1,0 +1,35 @@
+#standardSQL
+WITH activities AS (
+  SELECT answers.owner_user_id AS id,
+    FORMAT_DATE('%Y-%m', DATE(answers.creation_date)) AS period
+  FROM `bigquery-public-data.stackoverflow.posts_answers` AS answers
+  JOIN `bigquery-public-data.stackoverflow.posts_questions` AS questions
+  ON questions.id = answers.parent_id
+  WHERE CONCAT('|', questions.tags, '|') LIKE '%|google-bigquery|%' 
+  GROUP BY id, period
+), cohorts AS (
+  SELECT id, MIN(period) AS cohort FROM activities GROUP BY id
+), periods AS (
+    SELECT period
+    , ROW_NUMBER() OVER(ORDER BY period) AS num
+  FROM (SELECT DISTINCT cohort AS period FROM cohorts)
+), cohorts_size AS (
+  SELECT cohort, periods.num AS num, COUNT(DISTINCT activities.id) AS ids 
+  FROM cohorts JOIN activities ON activities.period = cohorts.cohort AND cohorts.id = activities.id
+  JOIN periods ON periods.period = cohorts.cohort
+  GROUP BY cohort, num
+), retention AS (
+  SELECT cohort, activities.period AS period, periods.num AS num, COUNT(DISTINCT cohorts.id) AS ids
+  FROM periods JOIN activities ON activities.period = periods.period
+  JOIN cohorts ON cohorts.id = activities.id 
+  GROUP BY cohort, period, num 
+)
+SELECT 
+  CONCAT(cohorts_size.cohort, ' - ',  FORMAT("%'d", cohorts_size.ids), ' users') AS cohort, 
+  retention.num - cohorts_size.num AS period_lag, 
+  retention.period as period_label,
+  ROUND(retention.ids / cohorts_size.ids * 100, 2) AS retention , retention.ids AS rids
+FROM retention
+JOIN cohorts_size ON cohorts_size.cohort = retention.cohort
+WHERE cohorts_size.cohort >= FORMAT_DATE('%Y-%m', DATE('2015-01-01'))
+ORDER BY cohort, period_lag, period_label  
