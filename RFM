@@ -1,0 +1,22 @@
+https://stackoverflow.com/questions/58451926/mysql-query-for-rfm-analysis
+
+SELECT user_id, SUM(price) AS 'Total Sum', R, M, COUNT(Orders.id_o),
+  CASE WHEN COUNT(Orders.id_o) < 2 THEN "3"
+       WHEN COUNT(Orders.id_o) >=2 AND COUNT(id_o) <4 THEN "2"
+       ELSE "1" 
+  END AS F
+FROM 
+(SELECT user_id, id_o, price,
+CASE WHEN price < 100 THEN '3'
+     WHEN price >= 100 AND price < 500 THEN '2'
+     ELSE '3'
+END AS M,
+
+CASE WHEN TIMESTAMPDIFF(DAY, o_date, DATE('2019-01-01')) < 30 THEN '1'
+     WHEN TIMESTAMPDIFF(DAY, o_date, DATE('2019-01-01')) >= 30 AND
+          TIMESTAMPDIFF(DAY, o_date, DATE('2019-01-01')) < 60 THEN '2'
+     ELSE '3'
+END AS R
+
+FROM orders) AS Orders
+GROUP BY user_id;
