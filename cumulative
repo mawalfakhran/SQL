@@ -1,0 +1,146 @@
+
+with summ as (
+SELECT
+  'Agent' as group_type
+  , EXTRACT(Month from job_result_created) as month
+  , EXTRACT(Year from job_result_created) as year
+  , FORMAT_DATE('%b-%Y', job_result_created) as month_year
+  , count(distinct agent_code) as total_users
+FROM `dbt_data.agt_mart_job_results_v2`
+WHERE job_result_status = 'Approve'
+and job_result_created >= '2023-01-01'
+GROUP BY 1,2,3,4
+),
+agg_by_period as (
+  SELECT
+  group_type
+  , month
+  , year
+  , month_year
+  , sum(total_users) as summ_agent_total
+FROM summ
+GROUP BY 1,2,3,4
+),
+cumm_agg as (
+SELECT
+  *
+  , SUM(summ_agent_total) over(
+    partition by
+      group_type
+    order by
+      year ASC, month ASC
+    rows unbounded preceding
+  ) as cumm_total
+FROM agg_by_period
+),
+joinan as (
+  SELECT
+  month_year
+  , commission_values
+  , net_revenue
+FROM(
+  SELECT
+    EXTRACT(Month from job_result_created) as month
+    , EXTRACT(Year from job_result_created) as year
+    , FORMAT_DATE('%b-%Y', job_result_created) as month_year
+    , SUM(commission_values) as commission_values
+    , SUM(Revenue-commission_values) as net_revenue
+  FROM `dbt_data.agt_mart_job_results_v2`
+  WHERE job_result_status = 'Approve'
+  GROUP BY 1,2,3
+  ORDER BY 2 asc, 1 asc 
+)
+),
+fix as (
+SELECT
+  a.month_year
+  , cumm_total
+  , commission_values
+  , net_revenue
+FROM cumm_agg a
+LEFT JOIN joinan b
+ON a.month_year = b.month_year
+),
+final as (
+SELECT
+  month_year
+  , cumm_total as cumm_total_agent
+  , CASE
+    WHEN month_year = 'Jan-2023' THEN 20
+    WHEN month_year = 'Feb-2023' THEN 40
+    WHEN month_year = 'Mar-2023' THEN 80
+    WHEN month_year = 'Apr-2023' THEN 120
+    WHEN month_year = 'May-2023' THEN 160
+    WHEN month_year = 'Jun-2023' THEN 200
+    WHEN month_year = 'Jul-2023' THEN 240
+    WHEN month_year = 'Aug-2023' THEN 280
+    WHEN month_year = 'Sep-2023' THEN 320
+    WHEN month_year = 'Oct-2023' THEN 360
+    WHEN month_year = 'Nov-2023' THEN 400
+    WHEN month_year = 'Dec-2023' THEN 440
+    END as target_agent
+  , commission_values
+  , CASE
+    WHEN month_year = 'Jan-2023' THEN 100000000
+    WHEN month_year = 'Feb-2023' THEN 200000000
+    WHEN month_year = 'Mar-2023' THEN 400000000
+    WHEN month_year = 'Apr-2023' THEN 600000000
+    WHEN month_year = 'May-2023' THEN 800000000
+    WHEN month_year = 'Jun-2023' THEN 1000000000
+    WHEN month_year = 'Jul-2023' THEN 1200000000
+    WHEN month_year = 'Aug-2023' THEN 1400000000
+    WHEN month_year = 'Sep-2023' THEN 1600000000
+    WHEN month_year = 'Oct-2023' THEN 1800000000
+    WHEN month_year = 'Nov-2023' THEN 2000000000
+    WHEN month_year = 'Dec-2023' THEN 2200000000
+    END as target_commission_value
+  , net_revenue
+  , CASE
+    WHEN month_year = 'Jan-2023' THEN 10000000
+    WHEN month_year = 'Feb-2023' THEN 20000000
+    WHEN month_year = 'Mar-2023' THEN 40000000
+    WHEN month_year = 'Apr-2023' THEN 60000000
+    WHEN month_year = 'May-2023' THEN 80000000
+    WHEN month_year = 'Jun-2023' THEN 100000000
+    WHEN month_year = 'Jul-2023' THEN 120000000
+    WHEN month_year = 'Aug-2023' THEN 140000000
+    WHEN month_year = 'Sep-2023' THEN 160000000
+    WHEN month_year = 'Oct-2023' THEN 180000000
+    WHEN month_year = 'Nov-2023' THEN 200000000
+    WHEN month_year = 'Dec-2023' THEN 220000000
+    END as target_net_revenue
+FROM fix
+)
+SELECT
+  PARSE_DATE('%b-%Y',month_year) as month_year
+  , cumm_total_agent
+  , target_agent
+  , CASE
+    WHEN ROUND(cumm_total_agent/target_agent,2) > 1 THEN 1
+    ELSE ROUND(cumm_total_agent/target_agent,2)
+    END as achieved_target_agt_Perc
+  , CASE
+    WHEN cumm_total_agent >= target_agent THEN 'Achieved'
+    ELSE 'Not Achieved'
+    END as target_agent_status
+  , commission_values
+  , target_commission_value
+  , CASE
+    WHEN ROUND(commission_values/target_commission_value,2) > 1 THEN 1
+    ELSE ROUND(commission_values/target_commission_value,2)
+    END as achieved_target_commission_Perc
+  , CASE
+    WHEN commission_values >= target_commission_value THEN 'Achieved'
+    ELSE 'Not Achieved'
+    END as target_commission_status
+  , net_revenue
+  , target_net_revenue
+  , CASE
+    WHEN ROUND(net_revenue/target_net_revenue,2) > 1 THEN 1
+    ELSE ROUND(net_revenue/target_net_revenue,2)
+    END as achieved_target_revenue_Perc
+  , CASE
+    WHEN net_revenue >= target_net_revenue THEN 'Achieved'
+    ELSE 'Not Achieved'
+    END as target_revenue_status
+FROM final
